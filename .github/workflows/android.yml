@@ -8,6 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Keep a single canonical SDK path so all steps use the same location
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+      # Add SDK commandline tools + platform-tools to PATH for all steps
+      PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${PATH}
 
     steps:
     - name: Checkout code
@@ -23,6 +30,7 @@ jobs:
         sudo apt-get update
         # Install the autotools/libtool/tooling that autoreconf needs plus common build deps
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          git \
           build-essential \
           autoconf \
           automake \
@@ -54,6 +62,7 @@ jobs:
           openjdk-11-jdk-headless
 
         # quick debug so we can see tools are present in logs
+        git --version || true
         autoconf --version || true
         automake --version || true
         libtool --version || libtoolize --version || true
@@ -66,10 +75,10 @@ jobs:
         pip install Cython==0.29.33 buildozer python-for-android
 
     - name: Pre-setup Android SDK Manager for Buildozer
-      env:
-        JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+      shell: bash
       run: |
-        SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+        # Use the job-level ANDROID_SDK_ROOT so all steps share the same SDK location
+        SDK_ROOT="$ANDROID_SDK_ROOT"
         mkdir -p "$SDK_ROOT"/cmdline-tools
         mkdir -p "$SDK_ROOT"/licenses
 
@@ -83,18 +92,23 @@ jobs:
           mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest" || true
         fi
 
+        # Ensure sdkmanager is available from tools/bin for backward compatibility
         mkdir -p "$SDK_ROOT"/tools/bin
-        ln -sf "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager "$SDK_ROOT"/tools/bin/sdkmanager
+        if [ -x "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager ]; then
+          ln -sf "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager "$SDK_ROOT"/tools/bin/sdkmanager
+        fi
 
-        export ANDROID_SDK_ROOT="$SDK_ROOT"
-        export ANDROID_HOME="$SDK_ROOT"
+        # Make sdkmanager executable
+        chmod +x "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager || true
+
+        # Ensure PATH for this step
         export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/platform-tools:$PATH"
 
         # Accept licenses (requires Java installed)
         yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses || true
 
         # Install essential Android SDK components (pick versions that match your buildozer.spec android.api)
-        sdkmanager --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        sdkmanager --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;21.4.7075529" "cmake;3.10.2.4988404"
 
         # Verify aidl exists
         if [ -x "$SDK_ROOT/build-tools/33.0.2/aidl" ]; then
@@ -103,22 +117,29 @@ jobs:
           echo "WARNING: aidl not found in build-tools; listing SDK_ROOT:"
           ls -la "$SDK_ROOT"
           ls -la "$SDK_ROOT"/build-tools || true
-          exit 0
+          # Don't fail here so we can capture debug info; the build step will fail with a clear error if incomplete.
         fi
 
     - name: Build with Buildozer
       env:
+        # Ensure these match the job-level env; redeclare to be explicit for this step
         ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
         ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
         JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-        PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${HOME}/.buildozer/android/platform/android-sdk/platform-tools:${HOME}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:$PATH
+        PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${HOME}/.local/bin:${PATH}
       run: |
         # Ensure buildozer uses the SDK we installed
-        export ANDROID_SDK_ROOT=${HOME}/.buildozer/android/platform/android-sdk
-        export ANDROID_HOME=${HOME}/.buildozer/android/platform/android-sdk
-        export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-        export PATH=${HOME}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${HOME}/.buildozer/android/platform/android-sdk/platform-tools:${HOME}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:$PATH
+        export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}
+        export ANDROID_HOME=${ANDROID_HOME}
+        export JAVA_HOME=${JAVA_HOME}
+        export PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/tools/bin:${PATH}
 
+        # Show some debug info
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        ls -la "$ANDROID_SDK_ROOT" || true
+        ls -la "$ANDROID_SDK_ROOT"/build-tools || true
+
+        # Build
         buildozer -v android debug
 
     - name: Upload APK Artifact
