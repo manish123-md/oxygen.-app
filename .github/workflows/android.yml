@@ -21,7 +21,8 @@ jobs:
     - name: Install platform dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libsqlite3-dev sqlite3 bzip2 libbz2-dev libssl-dev openssl libgdbm-dev libgdbm-compat-dev liblzma-dev libreadline-dev libncursesw5-dev libffi-dev uuid-dev tar openjdk-17-jdk unzip autoconf libtool pkg-config zlib1g-dev
+        # Yahan humne libtool, gettext, aur m4 tools ko add kiya hai jo libffi ke liye zaroori hain
+        sudo apt-get install -y libsqlite3-dev sqlite3 bzip2 libbz2-dev libssl-dev openssl libgdbm-dev libgdbm-compat-dev liblzma-dev libreadline-dev libncursesw5-dev libffi-dev uuid-dev tar openjdk-17-jdk unzip autoconf libtool pkg-config zlib1g-dev gettext m4 libtool-bin
 
     - name: Install Buildozer and Dependencies
       run: |
@@ -30,23 +31,18 @@ jobs:
 
     - name: Pre-setup Android SDK Manager for Buildozer
       run: |
-        # 1. Buildozer ke internal folders ko pehle se create karna
         mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools
         mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
         
-        # 2. Google Command Line Tools download aur extract karna
         wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -q
         unzip -q commandlinetools-linux-9477386_latest.zip -d ~/.buildozer/android/platform/android-sdk/cmdline-tools
         rm commandlinetools-linux-9477386_latest.zip
         
-        # 3. Path structure theek karna (latest folder setup)
         mv ~/.buildozer/android/platform/android-sdk/cmdline-tools/cmdline-tools ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest
         
-        # 4. Old tools structure ka symlink banana taaki Buildozer ko 'tools/bin/sdkmanager' mil sake
         mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
         ln -s ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
         
-        # 5. Licenses auto-accept mark karna
         echo -e "\n244ac7dc2b6901f85741a9d3329313b1e5021f56\n782327e505811d3b4610c3b3bc500e34dd3b95cd\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n9b20bde75b79bef17476568280459eed3103d558\ne9ac30d0b722fc78615c76b3fcb819411714c9c3\nf3191f90b3c4a21596dd403de65e04b96fd991cd\n11144a74a3c3d9224f6b2b46b14a873966db91a4" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
 
     - name: Build with Buildozer
