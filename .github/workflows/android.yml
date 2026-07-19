@@ -50,13 +50,15 @@ jobs:
           uuid-dev \
           tar \
           unzip \
-          wget
+          wget \
+          openjdk-11-jdk-headless
 
         # quick debug so we can see tools are present in logs
         autoconf --version || true
         automake --version || true
         libtool --version || libtoolize --version || true
         pkg-config --version || true
+        java -version || true
 
     - name: Install Buildozer and Dependencies
       run: |
@@ -64,34 +66,61 @@ jobs:
         pip install Cython==0.29.33 buildozer python-for-android
 
     - name: Pre-setup Android SDK Manager for Buildozer
+      env:
+        JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
       run: |
-        mkdir -p ~/.buildozer/android/platform/android-sdk/cmdline-tools
-        mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
-        
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -q
-        unzip -q commandlinetools-linux-9477386_latest.zip -d ~/.buildozer/android/platform/android-sdk/cmdline-tools
-        rm commandlinetools-linux-9477386_latest.zip
-        
-        mv ~/.buildozer/android/platform/android-sdk/cmdline-tools/cmdline-tools ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest
-        
-        mkdir -p ~/.buildozer/android/platform/android-sdk/tools/bin
-        ln -s ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager
-        
-        # (You may need to add license hashes for some SDK versions; keep what you had previously)
-        echo -e "\n244ac7dc2b6901f85741a9d3329313b1e5021f56\n782327e505811d3b4610c3b3bc500e34dd3b95cd\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n9b20bde75b79bef17476568280459eed3103d558\ne9ac30d0b" > ~/.buildozer/android/platform/android-sdk/licenses/licenses.sha1 || true
+        SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+        mkdir -p "$SDK_ROOT"/cmdline-tools
+        mkdir -p "$SDK_ROOT"/licenses
+
+        # Download and extract the commandline tools
+        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -q -O cmdline-tools.zip
+        unzip -q cmdline-tools.zip -d "$SDK_ROOT"/cmdline-tools
+        rm cmdline-tools.zip
+
+        # The distribution places the tools under cmdline-tools/cmdline-tools; move to 'latest'
+        if [ -d "$SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
+          mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest" || true
+        fi
+
+        mkdir -p "$SDK_ROOT"/tools/bin
+        ln -sf "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager "$SDK_ROOT"/tools/bin/sdkmanager
+
+        export ANDROID_SDK_ROOT="$SDK_ROOT"
+        export ANDROID_HOME="$SDK_ROOT"
+        export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/platform-tools:$PATH"
+
+        # Accept licenses (requires Java installed)
+        yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses || true
+
+        # Install essential Android SDK components (pick versions that match your buildozer.spec android.api)
+        sdkmanager --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+
+        # Verify aidl exists
+        if [ -x "$SDK_ROOT/build-tools/33.0.2/aidl" ]; then
+          echo "aidl found: $SDK_ROOT/build-tools/33.0.2/aidl"
+        else
+          echo "WARNING: aidl not found in build-tools; listing SDK_ROOT:"
+          ls -la "$SDK_ROOT"
+          ls -la "$SDK_ROOT"/build-tools || true
+          exit 0
+        fi
 
     - name: Build with Buildozer
       env:
-        ANDROID_NDK_HOME: ''
-        ANDROID_NDK_ROOT: ''
+        ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+        ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+        JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+        PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${HOME}/.buildozer/android/platform/android-sdk/platform-tools:${HOME}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:$PATH
       run: |
+        # Ensure buildozer uses the SDK we installed
+        export ANDROID_SDK_ROOT=${HOME}/.buildozer/android/platform/android-sdk
+        export ANDROID_HOME=${HOME}/.buildozer/android/platform/android-sdk
+        export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+        export PATH=${HOME}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${HOME}/.buildozer/android/platform/android-sdk/platform-tools:${HOME}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:$PATH
+
         buildozer -v android debug
 
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Oxygen-Android-APK
-        path: bin/*.apk
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
