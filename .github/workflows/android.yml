@@ -14,17 +14,9 @@ jobs:
       ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
       JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
       # Add SDK commandline tools + platform-tools to PATH for all steps
-      PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${PATH}
+      PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${{ github.workspace }}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
     - name: Install platform dependencies
       run: |
         sudo apt-get update
@@ -68,6 +60,14 @@ jobs:
         libtool --version || libtoolize --version || true
         pkg-config --version || true
         java -version || true
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
     - name: Install Buildozer and Dependencies
       run: |
@@ -121,21 +121,19 @@ jobs:
         fi
 
     - name: Build with Buildozer
-      env:
-        # Ensure these match the job-level env; redeclare to be explicit for this step
-        ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-        ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-        JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-        PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${HOME}/.local/bin:${PATH}
+      shell: bash
       run: |
         # Ensure buildozer uses the SDK we installed
-        export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}
-        export ANDROID_HOME=${ANDROID_HOME}
-        export JAVA_HOME=${JAVA_HOME}
-        export PATH=${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/tools/bin:${PATH}
+        export ANDROID_SDK_ROOT="${{ github.workspace }}/.buildozer/android/platform/android-sdk"
+        export ANDROID_HOME="${{ github.workspace }}/.buildozer/android/platform/android-sdk"
+        export JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH"
 
         # Show some debug info
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        echo "JAVA_HOME=$JAVA_HOME"
+        which java
+        java -version
         ls -la "$ANDROID_SDK_ROOT" || true
         ls -la "$ANDROID_SDK_ROOT"/build-tools || true
 
@@ -144,6 +142,7 @@ jobs:
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
+      if: always()
       with:
         name: Oxygen-Android-APK
         path: bin/*.apk
