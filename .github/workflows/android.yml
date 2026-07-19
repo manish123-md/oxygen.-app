@@ -29,11 +29,14 @@ jobs:
         pip install Cython==0.29.33 buildozer python-for-android
 
     - name: Build with Buildozer
-      # GitHub ke purane pre-installed NDK paths ko clear karke force build karwana
       env:
         ANDROID_NDK_HOME: ''
         ANDROID_NDK_ROOT: ''
       run: |
+        # Asli Jaadu: Android SDK ke saare licenses ko automatic accept karna
+        mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
+        echo -e "\n244ac7dc2b6901f85741a9d3329313b1e5021f56\n782327e505811d3b4610c3b3bc500e34dd3b95cd\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n9b20bde75b79bef17476568280459eed3103d558\ne9ac30d0b722fc78615c76b3fcb819411714c9c3\nf3191f90b3c4a21596dd403de65e04b96fd991cd\n11144a74a3c3d9224f6b2b46b14a873966db91a4" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+        
         buildozer -v android debug
 
     - name: Upload APK Artifact
