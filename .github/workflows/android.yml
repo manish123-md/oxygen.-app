@@ -10,11 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Keep a single canonical SDK path so all steps use the same location
-      ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-      ANDROID_HOME: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+      ANDROID_SDK_ROOT: /home/runner/.android/sdk
+      ANDROID_HOME: /home/runner/.android/sdk
       JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-      # Add SDK commandline tools + platform-tools to PATH for all steps
-      PATH: ${{ github.workspace }}/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/tools/bin:${{ github.workspace }}/.buildozer/android/platform/android-sdk/platform-tools:${{ github.workspace }}/.buildozer/android/platform/android-sdk/build-tools/33.0.2:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     steps:
     - name: Install platform dependencies
@@ -74,75 +72,174 @@ jobs:
         pip install --upgrade pip
         pip install Cython==0.29.33 buildozer python-for-android
 
-    - name: Pre-setup Android SDK Manager for Buildozer
-      shell: bash
+    - name: Setup Android SDK
       run: |
-        # Use the job-level ANDROID_SDK_ROOT so all steps share the same SDK location
-        SDK_ROOT="$ANDROID_SDK_ROOT"
-        mkdir -p "$SDK_ROOT"/cmdline-tools
-        mkdir -p "$SDK_ROOT"/licenses
+        set -e
+        SDK_ROOT="${ANDROID_SDK_ROOT}"
+        mkdir -p "$SDK_ROOT"/{cmdline-tools,licenses,build-tools,platforms,ndk,cmake}
 
-        # Download and extract the commandline tools
-        wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -q -O cmdline-tools.zip
-        unzip -q cmdline-tools.zip -d "$SDK_ROOT"/cmdline-tools
-        rm cmdline-tools.zip
+        echo "📥 Downloading Android CommandLine Tools..."
+        cd /tmp
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+        unzip -q commandlinetools-linux-9477386_latest.zip
+        rm commandlinetools-linux-9477386_latest.zip
 
-        # The distribution places the tools under cmdline-tools/cmdline-tools; move to 'latest'
-        if [ -d "$SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
-          mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest" || true
-        fi
+        echo "📁 Setting up CommandLine Tools structure..."
+        mkdir -p "$SDK_ROOT"/cmdline-tools/latest
+        mv cmdline-tools/* "$SDK_ROOT"/cmdline-tools/latest/
+        rm -rf cmdline-tools
 
-        # Ensure sdkmanager is available from tools/bin for backward compatibility
+        # Create symlink for backward compatibility
         mkdir -p "$SDK_ROOT"/tools/bin
-        if [ -x "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager ]; then
-          ln -sf "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager "$SDK_ROOT"/tools/bin/sdkmanager
-        fi
+        ln -sf "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager "$SDK_ROOT"/tools/bin/sdkmanager || true
 
-        # Make sdkmanager executable
-        chmod +x "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager || true
+        # Make sure sdkmanager is executable
+        chmod +x "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager
+        chmod +x "$SDK_ROOT"/cmdline-tools/latest/bin/avdmanager
 
-        # Ensure PATH for this step
-        export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/tools/bin:$SDK_ROOT/platform-tools:$PATH"
+        echo "✅ CommandLine Tools setup complete"
+        ls -la "$SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager
 
-        # Accept licenses (requires Java installed)
-        yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses || true
+    - name: Accept Android Licenses
+      run: |
+        SDK_ROOT="${ANDROID_SDK_ROOT}"
+        export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+        
+        echo "📋 Accepting Android SDK Licenses..."
+        yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+        echo "✅ Licenses accepted"
 
-        # Install essential Android SDK components (pick versions that match your buildozer.spec android.api)
-        sdkmanager --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;21.4.7075529" "cmake;3.10.2.4988404"
+    - name: Install Android SDK Components
+      run: |
+        set -e
+        SDK_ROOT="${ANDROID_SDK_ROOT}"
+        export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
 
-        # Verify aidl exists
-        if [ -x "$SDK_ROOT/build-tools/33.0.2/aidl" ]; then
-          echo "aidl found: $SDK_ROOT/build-tools/33.0.2/aidl"
+        echo "📦 Installing Android SDK Components..."
+        sdkmanager --sdk_root="$SDK_ROOT" \
+          "platform-tools" \
+          "platforms;android-33" \
+          "build-tools;33.0.2" \
+          "ndk;21.4.7075529" \
+          "cmake;3.10.2.4988404"
+
+        echo "✅ SDK Components installed"
+
+    - name: Verify Android SDK Installation
+      run: |
+        SDK_ROOT="${ANDROID_SDK_ROOT}"
+
+        echo "🔍 Verifying SDK installation..."
+        echo "SDK_ROOT: $SDK_ROOT"
+
+        # Check critical tools
+        if [ -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+          echo "✅ sdkmanager found"
         else
-          echo "WARNING: aidl not found in build-tools; listing SDK_ROOT:"
-          ls -la "$SDK_ROOT"
-          ls -la "$SDK_ROOT"/build-tools || true
-          # Don't fail here so we can capture debug info; the build step will fail with a clear error if incomplete.
+          echo "❌ sdkmanager NOT found"
+          exit 1
         fi
+
+        if [ -f "$SDK_ROOT/build-tools/33.0.2/aidl" ]; then
+          echo "✅ aidl found"
+          chmod +x "$SDK_ROOT/build-tools/33.0.2/aidl"
+        else
+          echo "❌ aidl NOT found"
+          echo "Contents of build-tools:"
+          ls -la "$SDK_ROOT/build-tools/" || true
+          exit 1
+        fi
+
+        if [ -f "$SDK_ROOT/platform-tools/adb" ]; then
+          echo "✅ adb found"
+          chmod +x "$SDK_ROOT/platform-tools/adb"
+        else
+          echo "❌ adb NOT found"
+          exit 1
+        fi
+
+        echo "✅ All critical tools verified!"
+
+    - name: Create buildozer.spec
+      run: |
+        cat > buildozer.spec << 'EOF'
+        [app]
+        title = Oxygen
+        package.name = oxygen
+        package.domain = org.example.oxygen
+        source.dir = .
+        source.include_exts = py,png,jpg,kv,atlas
+        version = 0.1
+
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        android.accept_sdk_license = True
+
+        [app:permissions]
+        android.permissions = INTERNET,ACCESS_NETWORK_STATE
+
+        [buildozer:android]
+        android.api = 33
+        android.minapi = 21
+        android.ndk = 21b
+        android.arch = armeabi-v7a
+        android.gradle_dependencies = 
+        android.add_src = 
+        android.entrypoint = org.kivy.android.PythonActivity
+        android.logcat_filters = *:S python:D
+        EOF
+        echo "✅ buildozer.spec created"
 
     - name: Build with Buildozer
-      shell: bash
       run: |
-        # Ensure buildozer uses the SDK we installed
-        export ANDROID_SDK_ROOT="${{ github.workspace }}/.buildozer/android/platform/android-sdk"
-        export ANDROID_HOME="${{ github.workspace }}/.buildozer/android/platform/android-sdk"
+        set -e
+        
+        # Set all required environment variables
+        export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT}"
+        export ANDROID_HOME="${ANDROID_SDK_ROOT}"
         export JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
-        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/tools/bin:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH"
+        export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/33.0.2:$PATH"
 
-        # Show some debug info
+        echo "🔧 Build Environment:"
         echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+        echo "ANDROID_HOME=$ANDROID_HOME"
         echo "JAVA_HOME=$JAVA_HOME"
-        which java
-        java -version
-        ls -la "$ANDROID_SDK_ROOT" || true
-        ls -la "$ANDROID_SDK_ROOT"/build-tools || true
+        echo "PATH=$PATH"
+        echo ""
 
-        # Build
+        echo "🔍 Verifying tools before build..."
+        which java && java -version
+        which sdkmanager
+        ls -la "$ANDROID_SDK_ROOT/build-tools/33.0.2/aidl" || exit 1
+
+        echo ""
+        echo "🏗️  Building APK with Buildozer..."
         buildozer -v android debug
+
+    - name: Check Build Output
+      if: always()
+      run: |
+        echo "📦 Checking build artifacts..."
+        if [ -d "bin" ]; then
+          ls -lah bin/ || true
+        else
+          echo "⚠️  bin/ directory not found"
+        fi
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
-      if: always()
+      if: success()
       with:
         name: Oxygen-Android-APK
         path: bin/*.apk
+        retention-days: 30
+
+    - name: Upload Build Logs on Failure
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Build-Logs
+        path: |
+          .buildozer/android/platform/build-*/build/logs/*.txt
+          .buildozer/logs/
