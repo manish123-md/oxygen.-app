@@ -29,8 +29,12 @@ jobs:
         pip install Cython==0.29.33 buildozer python-for-android
 
     - name: Build with Buildozer
+      # GitHub ke purane pre-installed NDK paths ko clear karke force build karwana
+      env:
+        ANDROID_NDK_HOME: ''
+        ANDROID_NDK_ROOT: ''
       run: |
-        yes | buildozer -v android debug
+        buildozer -v android debug
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
